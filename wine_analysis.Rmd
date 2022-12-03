@@ -1,0 +1,1262 @@
+---
+title: "Wine Quality - Principal Components Analysis"
+author: 'Noa Miller'
+date: "03 12 2022"
+output:
+  pdf_document: default
+  html_document: default
+geometry: "top=2cm,bottom=2cm"
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE,
+                      include = FALSE)
+```
+
+
+```{r}
+library(ggplot2)
+library(ggcorrplot)
+library(tidyverse)
+library(corrplot)
+library(MASS)
+library(patchwork)
+wine <- read_csv("C:/Users/steff/Desktop/Sheffield_Studies/MSc/MAS61007_ML/Exercises/Ass1/data/winequality-all.csv")
+attach(wine)
+head(wine)
+```
+
+
+
+```{r}
+header <- make.names(colnames(wine))
+colnames(wine) <- header
+wine
+```
+
+```{r}
+nrow(wine%>%filter(quality>=7, colour==1))/nrow(wine%>%filter(colour==1))
+nrow(wine%>%filter(quality==5, colour==1))/nrow(wine%>%filter(colour==1))
+nrow(wine%>%filter(quality>=7, colour==0))/nrow(wine%>%filter(colour==0))
+nrow(wine%>%filter(quality==6, colour==0))/nrow(wine%>%filter(colour==0))
+```
+
+
+The wine data contains 11 chemical features, such as total sulfur dioxide, or sulphates for more than 6,000 observations of red and white wine. Their ratings took place on a subjective basis and is categorized by quality ranging from 3 (lowest in the data) up to 9 (highest).
+
+In terms of volume, red wine is somewhat under-represented, and make out only 25% of the observations. White wine has a larger share of about 22% in the top quality classes (7-9), whereas red wine has a somewhat lower share at 14%. 
+Most red wines (43%) got rated quality 5, whereas the majority (45%) of white ones are classified as quality 6.
+
+In terms of correlation between the quality and various chemical factors, we find that alcohol content positively correlates with quality for both red wine and white wine. On average, red wine contains a significantly higher amount of volatile acidity than white ones. On the other hand, white wine is nearly three times richer in residual sugar and total sulphur dioxide.
+
+Red ones tend to be denser at the same level of alcohol content, while for both types density decreases as the alcohol level increases, and for white wine at a much steeper rate.
+We also observe that wine of a higher standard have relatively higher level of alcohol content. In summary, we expect top-quality wine to have an elevated alcohol content and low density.
+
+
+```{r}
+summary(wine%>%filter(colour==0))
+```
+
+```{r}
+summary(wine%>%filter(colour==1))
+```
+
+
+```{r white wine is overrepresented in the data}
+wine%>%dplyr::select(colour)%>%
+  count(colour)
+```
+
+```{r fig.height = 7, fig.width = 14, include = TRUE}
+cor_white <- ggcorrplot(cor(wine[,1:12]%>%filter(colour == 0)), method="circle", type = "lower",
+           outline.color = "white", title="White wine", colors = c("#3333FF", "white", "#FF0000"), insig="blank")+
+  guides(fill=FALSE)+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+cor_red <- ggcorrplot(cor(wine[,1:12]%>%filter(colour == 1)), method="circle",  type = "lower",
+           outline.color = "white", title="Red wine", colors =  c("#3333FF", "white", "#FF0000"),  insig="blank", legend.title = "correlation")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+cor_white + cor_red
+```
+
+
+```{r correlation plots}
+
+corrplot(cor(wine[,1:12]), oder="FPC", type="lower",diag=FALSE, title="Correlation plot", tl.srt=15, col=COL2('PRGn'), tl.col = "black")+
+  facet_wrap(vars(quality))
+
+
+corrplot(cor(wine[,1:12]), oder="FPC", type="lower",diag=FALSE, title="Correlation plot", tl.srt=15, col=COL2('PRGn'), tl.col = "black")+
+  facet_wrap(vars(colour))
+# similar picture, quality driven by density, alcohol and volatile acidity
+# pairs(wine[1:20,1:12])
+corrplot(cor(wine%>%filter(colour==0))[,1:12], tl.col="black", tl.srt=45)
+
+# quality depends very much on alcohol, less on density, but more importantly on -volatile acidity
+corrplot(cor(wine%>%filter(colour==1))[,1:12],tl.col="black", tl.srt=45)
+```
+
+
+
+```{r count by quality cat}
+# quality 5, 6, 7 are most common in the data
+wine%>%dplyr::select(quality)%>%
+  count(quality)
+
+ggplot(wine, aes(x=quality))+
+  geom_histogram()
+```
+
+
+
+
+
+```{r scaled diff sulfur.dioxide vs volatile.acidity plot}
+white.mean <- wine%>%filter(colour == 0)%>%
+  dplyr::select(-colour)%>%
+  apply(2,mean)
+white.sd <- wine%>%filter(colour == 0)%>%
+  dplyr::select(-colour)%>%
+  apply(2,sd)
+red.mean <- wine%>%filter(colour == 1)%>%
+  dplyr::select(-colour)%>%
+  apply(2,mean)
+red.sd <- wine%>%filter(colour == 1)%>%
+  dplyr::select(-colour)%>%
+  apply(2,sd)
+
+scaled.diff <- abs(white.mean-red.mean)/ (red.sd + white.sd)
+sort(scaled.diff)
+```
+
+
+# Principal Component Analysis and Chemical Differences
+
+The first five principal components encapsulate about 50% of the variation in the data. PC1 is a measure of free and total sulfur dioxide versus volatile acidity and chlorides. By definition, the most variation in the data is stored within this component. The second principal component is a measure of contrast between density and alcohol, and it encapsulates about 23% of the spread in the data. However, the main factor to distinguish by colour is PC1. Therefore the main chemical difference between red and white wine can be observed in terms of the four main chemical factors within that component.
+Accordingly, white wine tend to have a higher total and free sulfur dioxide content, whereas red wine display a higher level of volatile acidity and chlorides.
+
+
+```{r PC1 PC2 PLOT}
+binCol<- c("white" = "#9999FF", "red" = "#FF6666")
+wine.pca <- princomp(wine[,1:11], cor = T)
+#summary(wine.pca)
+wine.pca$sdev
+#loadings(wine.pca)
+
+pca.frame <- as.data.frame(predict(wine.pca))%>%mutate(index=row.names(.))
+wine <- wine%>%mutate(index=row.names(.))
+pca.colour <- wine%>%dplyr::select( index,colour, quality)%>%
+  inner_join(pca.frame, by = "index")
+
+
+
+pc1_2 <- ggplot(pca.colour%>%mutate(colour=fct_recode(as.factor(colour),
+                                       "red"= "1" ,
+                                       "white" = "0")), aes(x=Comp.1, y=Comp.2, col=colour))+
+  scale_colour_manual(values = binCol)+
+  geom_point(alpha=0.2)+
+  ggtitle("PC1 vs PC2 by colour", "Red wine tend to display higher PC1 level")+
+  labs(x="Principal Component 1", y="Principal Component 2")+
+  guides(fill=FALSE)+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        legend.position="none",
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14)) 
+```
+
+```{r PC3 PC4 PLOT}
+pc3_4<-ggplot(pca.colour%>%mutate(colour=fct_recode(as.factor(colour),
+                                       "red"= "1" ,
+                                       "white" = "0")), aes(x=Comp.3, y=Comp.4, col=colour))+
+  scale_colour_manual(values = binCol)+
+  geom_point(alpha=0.2)+
+  ggtitle("PC3 vs PC4 by colour", "White wine tends to have a somewhat higher PC3 level")+
+  labs(x="Principal Component 3", y="Principal Component 4")+
+  theme(legend.position = "none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+  
+```
+
+
+
+```{r performing PCA on wine data}
+wine.pca <- princomp(wine[,1:11], cor = T)
+summary(wine.pca)
+wine.pca$sdev
+loadings(wine.pca)
+```
+
+
+```{r pca plots}
+
+#PC1 and PC2 shows a distinct separation in the data
+plot(predict(wine.pca)[,1:2])
+eqscplot(predict(wine.pca)[,1:2])
+eqscplot(predict(wine.pca)[,4:5])
+#View(predict(wine.pca))
+```
+
+
+```{r pca.frame predictions with index}
+plot(wine.pca,main="Distribution of Principal Components")
+# creating DF out of wine.pca predictions, adding index to join in colour
+pca.frame <- as.data.frame(predict(wine.pca))%>%mutate(index=row.names(.))
+wine <- wine%>%mutate(index=row.names(.))
+pca.colour <- wine%>%dplyr::select( index,colour, quality)%>%
+  inner_join(pca.frame, by = "index")
+```
+
+```{r }
+ggplot(pca.colour, aes(x=colour, y=Comp.1, fill=as.factor(colour)))+
+  geom_boxplot()
+```
+
+```{r }
+ggplot(pca.colour, aes(x=colour, y=Comp.3, fill=as.factor(colour)))+
+  geom_boxplot()
+
+ggplot(pca.colour, aes(x=colour, y=Comp.4, fill=as.factor(colour)))+
+  geom_boxplot()
+```
+
+
+```{r PCA PLOT1, fig.cap="White wine tends to take contain more sulfur dioxide, whereas red wine is rather rich in volatie acidity.",  fig.width=5, fig.height=7}
+binCol<- c("white" = "#9999FF", "red" = "#FF6666")
+freesul_volac <- ggplot(wine%>%mutate(colour=fct_recode(as.factor(colour),
+                                       "red"= "1" ,
+                                       "white" = "0")), aes(x=free.sulfur.dioxide,y=volatile.acidity, col=colour))+
+  scale_colour_manual(values = binCol)+
+  geom_violin(alpha=0.5, trim=F, scale="count")+
+  geom_jitter(alpha=0.1)+
+  ggtitle("Free sulfur dioxide vs acidity", "Largest variance by wine colour")+
+  labs(x="Free sulfur dioxide", y="Volatile acidity")+
+  labs(fill="Wine colour")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        legend.position="bottom",
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+```
+
+
+```{r PCA PLOT2, fig.cap="Red wine displays higher chlorides levels, while red wine tends to be richer in total sulfur dioxides.", fig.width=5, fig.height=7}
+totalsul_chlor<- ggplot(wine%>%mutate(colour=fct_recode(as.factor(colour),
+                                       "red"= "1" ,
+                                       "white" = "0")), aes(x=total.sulfur.dioxide,y=chlorides, col=colour))+
+  scale_colour_manual(values = binCol)+
+  geom_violin(alpha=0.5, trim=F, scale="count")+
+  geom_jitter(alpha=0.1)+
+  ggtitle("Total s. dioxide vs chlorides", "Largest variance by wine colour")+
+  theme(legend.position = "none")+
+  labs(x="Total sulfur dioxide", y="Chlorides")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))+
+  guides(fill=FALSE)
+```
+
+
+```{r fig.width=15, fig.height=6, include=TRUE}
+pc1_2 + freesul_volac + totalsul_chlor
+```
+
+
+```{r}
+ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=free.sulfur.dioxide, x=as.factor(colour),fill=as.factor(colour)), xaxt="n")+
+  geom_violin()+
+  geom_boxplot(width=0.1, fill="black", outlier.colour=NA, alpha=0.2)+
+  stat_summary(fun=median, geom="point", fill="white", 
+               shape=12, size=1, colour="white", alpha=0.9)+
+  facet_grid(cols=vars(colour))+
+  #ggtitle("Free sulfur dioxide by colour and quality", 
+          #"As quality increases over class 5, alcohol content tends to rise gradually")+
+  labs(x="Quality level", y="Free sulfur dioxide")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme_classic()+
+  theme(axis.line = element_blank())#+
+  #facet_grid(cols=vars(quality))
+```
+
+
+```{r EDA PLOT1 total dioxide VS sulphates level white vs red, inc}
+ggplot(wine, aes(x=total.sulfur.dioxide,y=chlorides, col=as.factor(colour)))+
+  geom_point(alpha=0.2)+
+  ggtitle("Total sulfur dioxide vs chlorides", "White wine have less chorides, but tend to have a higher total sulfur dioxide level")
+```
+
+
+
+
+```{r}
+biplot(wine.pca, expand=0.9, arrow.len=0,main=, xlab="PC1", ylab="PC2")+
+title("Density, alcohol content, free and total sulfur dioxide vs vol acidity, sulfates")
+
+```
+
+
+# Particular features in wine of good quality
+
+It is common for both colours that wine of better quality are likely to have a higher alcohol content, but lower density. As quality gets better, alcohol content progressively increases, while density decreases. This trend is slightly more pronounced for white wine. 
+
+
+```{r PLOT2 quality vs alcohol}
+alcohol_quality<-ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), aes(x=as.factor(quality), y = alcohol, fill=as.factor(quality)))+
+  #geom_dotplot(binaxis="y", binwidth = .01, stackdir="center")+
+  geom_violin(alpha=0.6)+
+  stat_summary(fun=median, geom="point", fill="black", colour="black", shape=16, size=3)+
+  facet_grid(cols=vars(colour))+
+  ggtitle("Alcohol level by colour and quality", "Alcohol content increases as quality improves")+
+  labs(fill="Quality", x="Quality", y="Alcohol content")+
+  guides(scale="none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+```
+
+
+```{r PLOT2.2 quality vs density}
+
+density_quality <- ggplot(wine%>%filter(density<1.01)%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), aes(x=as.factor(quality), y = density, fill=as.factor(quality)))+
+  #geom_dotplot(binaxis="y", binwidth = .00005, stackdir="center")+
+  geom_violin(alpha=0.6)+
+  facet_grid(cols=vars(colour))+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=3, colour="black")+
+  ggtitle("Density level by colour and quality", "Density decreases as quality improves")+
+  labs(fill="Quality", x="Quality", y="Density")+
+  theme(legend.position = "none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+```
+
+```{r fig.width=15, fig.height=6, include=TRUE}
+alcohol_quality + density_quality
+```
+
+
+
+```{r PLOT2.3 quality vs pH}
+
+ph_quality <- ggplot(wine%>%filter(density<1.01)%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), aes(x=as.factor(quality), y = pH, col=as.factor(quality)))+
+  geom_dotplot(binaxis="y", binwidth = .00005, stackdir="center")+
+  geom_violin(alpha=0.6)+
+  facet_grid(cols=vars(colour))+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=3, colour="black", alpha=0.5)+
+  ggtitle("Citric acid by colour and quality", "xx")+
+  labs(fill="Quality", x="Quality", y="Citric acid")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "darkgrey"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+```
+
+
+```{r PC table top wine}
+pivot1 <- pca.colour%>%filter(quality==8)%>%dplyr::select(-index, -quality)%>%group_by(colour)%>%
+  pivot_longer(Comp.1:Comp.11,
+               names_to = "name",
+               values_to="val")%>%
+  group_by(colour, name)%>%
+  summarize(mean_val=mean(val))
+
+pivot1%>%pivot_wider(names_from = colour,
+                     values_from = mean_val)
+```
+
+
+```{r}
+summary(wine)
+summary(pca.frame)
+```
+
+
+```{r PCA PLOT4, fig.cap="Higher quality wine tend to have a lower PC2 value, and a PC1 close to zero.", fig.width=6, fig.asp=0.618, out.width=0.5}
+colVec <- c("3"="#E0E0E0", "4"="#C0C0C0", "5"= "#A0A0A0", "6"="#808080", "7"="#3333FF",
+            "8"="#9933FF", "9"="#FF0000")
+pc1_2.top <- ggplot(pca.colour%>%mutate(colour=fct_recode(factor(colour),
+                                      "White" = "0",
+                                      "Red" = "1")), aes(x=Comp.1, y=Comp.2, col=as.factor(quality)))+
+  geom_point(alpha=0.4)+ 
+  ggtitle("Principal Components 1, 2 by colour","White wine of quality tends to have a lower PC2")+
+  scale_colour_manual(values=colVec)+
+  scale_fill_manual(labels="blah")+
+  labs(fill="Quality",x="PC1 27.54%", y="PC2 22.67%")+
+  facet_grid(cols=vars(as.factor(colour)))+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+```
+
+
+```{r PCA PLOT3, fig.cap="Higher quality wine tend to have a lower PC2 value, and a PC1 close to zero.", fig.width=6, fig.asp=0.618, out.width=0.5}
+
+pc3_4.top <- ggplot(pca.frame%>%mutate(colour=fct_recode(as.factor(colour),
+                                      "White" = "0",
+                                      "Red" = "1")), aes(x=Comp.3, y=Comp.4, col=as.factor(quality)))+
+  geom_point(alpha=0.4)+  
+  ggtitle("Principal Components 3, 4 by colour","Top red wine has higher PC3")+
+  scale_colour_manual(values=colVec)+
+  labs(x="PC3 14.5%", y="PC4 8.82%")+
+  facet_grid(cols=vars(as.factor(colour)))+
+  theme(legend.position="none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=1), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+```
+
+
+When distinguishing by quality, we observe a pattern when plotting principal components. The below visualization uncovers that top quality white wine tend to have a lower level of PC1, while red ones show a relatively higher PC1 value. Further to that, white wine tend to have a PC3 near zero, while red ones' value is somewhat higher with a likely lower PC4. Fixed acidity and sulphates are features with one of the highest loadings in the first synthetic component (PC1) amongst top wine of quality 7, 8, 9. These are the variables that account for an overall higher PC1 level for red wine.
+
+
+```{r, fig.width=15, fig.height=6, include=TRUE}
+pc1_2.top + pc3_4.top
+```
+
+
+```{r}
+# pca for top quality wine
+top_wine <- wine%>%filter(quality== 7 | quality == 8 | quality ==9)
+top.pca <- princomp(top_wine[1:11], cor=TRUE)
+summary(top.pca)
+loadings(top.pca)
+```
+
+This means,that there are distinct characteristics that differ by wine colour.
+A top standard red wine is likely to have a relatively high sulphates content and citric acidity level but a somewhat lower pH value. 
+Citric acidity and sulphates concentration tend to rise for red wine of higher quality. On the contrary, as quality increases, white wine displays no major change in terms of these chemical features.
+
+```{r difference top quality xxx, fig.width=5, fig.height=7}
+#First of all, white wine of good quality are likely to have less free sulfur dioxide and a lower chlorides level.
+ggplot(wine ,aes(x=free.sulfur.dioxide, y=chlorides))+
+  geom_point(aes(color=as.factor(colour)), alpha=0.2)+
+  facet_grid(cols=vars(quality))+
+  ggtitle("Free sulfur dioxide vs volatile acidity by quality and color", 
+          "Red wine tend to have a higher volatile acidity and lower free sulfur dioxide content.")
+
+freesulf <- ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=free.sulfur.dioxide, x=as.factor(quality),fill=as.factor(quality)), xaxt="n")+
+  geom_violin(alpha=0.6)+
+  #geom_jitter(alpha=0.05)+
+  geom_boxplot(width=0.1, fill="black", outlier.colour=NA, alpha=0.2)+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=3, colour="black", alpha=0.9)+
+  facet_grid(cols=vars(colour))+
+  theme(strip.text = element_text(
+    size = 16, color = "black"))+
+  ggtitle("Free sulfur dioxide by colour and quality", 
+          "Higher quality white wine tend to contain more free sulfur dioxides")+
+  labs(x="Quality level", y="Free sulfur dioxide")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme(axis.line = element_blank())+
+  guides(fill="none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "darkgrey"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+
+chlorides <- ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=chlorides, x=as.factor(quality),fill=as.factor(quality)), xaxt="n")+
+  geom_violin(alpha=0.6)+
+  #geom_jitter(alpha=0.05)+
+  geom_boxplot(width=0.1, fill="black", outlier.colour=NA, alpha=0.2)+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=3, colour="black", alpha=0.9)+
+  facet_grid(cols=vars(colour))+
+  theme(strip.text = element_text(
+    size = 16, color = "black"))+
+  ggtitle("Chlorides by colour and quality", 
+          "Higher quality white wine tend to contain more free sulfur dioxides")+
+  labs(x="Quality level", y="Chlorides")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme(axis.line = element_blank())+
+  guides(fill="none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "darkgrey"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+```
+
+
+```{r difference top quality citric acidity, fig.width=5, fig.height=7}
+
+cacid <-ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=citric.acid, x=as.factor(quality),fill=as.factor(quality)), xaxt="n")+
+  geom_violin(alpha=0.6)+
+  #geom_jitter(alpha=0.05)+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=2, colour="black")+
+  facet_grid(cols=vars(colour))+
+  theme(strip.text = element_text(
+    size = 16, color = "black"))+
+  ggtitle("Citric acidity by colour and quality", 
+          "Higher quality red wine show elevated citric acid levels")+
+  labs(x="Quality level", y="Citric acidity")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme(axis.line = element_blank())+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+```
+
+```{r difference top quality sulphates, fig.width=5, fig.height=7}
+
+sulph <- ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=sulphates, x=as.factor(quality),fill=as.factor(quality)), xaxt="n")+
+  geom_violin(alpha=0.6)+
+  #geom_jitter(alpha=0.05)+
+  #geom_boxplot(width=0.1, fill="black", outlier.colour=NA, alpha=0.2)+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=1, colour="black", alpha=0.9)+
+  facet_grid(cols=vars(colour))+
+  theme(strip.text = element_text(
+    size = 16, color = "black"))+
+  stat_summary(fun=median, geom="point", fill="black", 
+               shape=16, size=2, colour="black")+
+  ggtitle("Sulphates level by colour and quality", 
+          "Sulphates content increases with quality for red")+
+  labs(x="Quality level", y="Sulphates")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme(axis.line = element_blank())+
+  guides(fill="none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14),
+        strip.text=element_text(face="bold", size=rel(2)))
+
+```
+
+
+
+```{r fig.width=15, fig.height=6, include=TRUE}
+cacid + sulph
+```
+
+
+
+```{r EDA PLOT2.2,fig.width=5, fig.height=7}
+# include in report
+ggplot(wine%>%mutate(colour= fct_recode(as.factor(colour),
+                                        "White" = "0",
+                                        "Red" = "1")), 
+       aes(y=chlorides, x=as.factor(quality),fill=as.factor(quality)), xaxt="n")+
+  geom_violin()+
+  geom_boxplot(width=0.1, fill="black", outlier.colour=NA, alpha=0.2)+
+  stat_summary(fun=median, geom="point", fill="white", 
+               shape=12, size=1, colour="white", alpha=0.9)+
+  facet_grid(cols=vars(colour))+
+  ggtitle("Chlorides by colour and quality", 
+          "As quality increases over class 5, alcohol content tends to rise gradually")+
+  labs(x="Quality level", y="Chlorides")+
+  guides(fill=guide_legend(title="Quality level"))+
+  theme_classic()+
+  theme(axis.line = element_blank())
+```
+
+
+```{r PCA PLOT}
+ggplot(wine ,aes(x=free.sulfur.dioxide, y=volatile.acidity))+
+  geom_point(aes(color=as.factor(colour)), alpha=0.2)+
+  facet_grid(cols=vars(quality))+
+  ggtitle("Free sulfur dioxide vs volatile acidity by quality and color", 
+          "Red wine tend to have a higher volatile acidity and lower free sulfur dioxide content.")
+```
+
+```{r PC1 vol acidity, chlorides for white by quality}
+
+ggplot(wine%>%dplyr::filter(colour==0), aes(x=as.factor(quality), y=free.sulfur.dioxide, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Free sulfur dioxide by quality / White wine", "Better quality whites tend to have a higher free sulufr level")
+
+```
+
+
+```{r}
+lmWhiteFreesulfur <- lm(free.sulfur.dioxide ~ as.factor(quality), wine%>%dplyr::filter(colour==0))
+summary(lmWhiteFreesulfur)
+```
+
+```{r}
+lmWhiteFChlorides <- lm(chlorides ~ as.factor(quality), wine%>%dplyr::filter(colour==0))
+summary(lmWhiteFChlorides)
+```
+
+```{r}
+lmWhiteAlc <- lm(alcohol ~ as.factor(quality), wine%>%dplyr::filter(colour==0))
+summary(lmWhiteAlc)
+```
+
+```{r}
+lmWhiteDens <- lm(density ~ as.factor(quality), wine%>%dplyr::filter(colour==0))
+summary(lmWhiteDens)
+```
+
+
+```{r PC2 density, alc for white by quality}
+ggplot(wine%>%dplyr::filter(colour==0), aes(x=as.factor(quality), y=density, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Density by quality level", "White wine of higher quality tend to be less dense")
+
+ggplot(wine%>%dplyr::filter(colour==0), aes(x=as.factor(quality), y=alcohol, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Alcohol level by quaity", "High quality white wine tend to contain more alcohol")
+```
+
+
+```{r PC1 Red wine good quality}
+
+ggplot(wine%>%dplyr::filter(colour==1), aes(x=as.factor(quality), y=sulphates, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Sulphates content of red wine by quality", "Top quality red wine are likely to have a very high sulphates content")
+
+ggplot(wine%>%dplyr::filter(colour==1), aes(x=as.factor(quality), y=citric.acid, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Citric acid level of red wine by quality", "Top quality red wine tend to have a high citric acid level")
+
+ggplot(wine%>%dplyr::filter(colour==1), aes(x=as.factor(quality), y=pH, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Ph level of red wine by quality", "The best red wine are likely to show low Ph levels")
+```
+
+
+```{r}
+lmRedSulph <- lm(sulphates ~ as.factor(quality), wine%>%dplyr::filter(colour==1))
+summary(lmRedSulph)
+```
+
+```{r}
+lmRedPh <- lm(pH ~ as.factor(quality), wine%>%dplyr::filter(colour==1))
+summary(lmRedPh)
+```
+
+```{r}
+lmRedCitric <- lm(citric.acid ~ as.factor(quality), wine%>%dplyr::filter(colour==1))
+summary(lmRedCitric)
+```
+
+
+```{r PC2 Red wine good quality}
+ggplot(wine%>%dplyr::filter(colour==1), aes(x=as.factor(quality), y=alcohol, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Alcohol content of red wine by quality", "Towards the top quality categories, red ines tend to contain more alcohol")
+
+
+ggplot(wine%>%dplyr::filter(colour==1), aes(x=as.factor(quality), y=density, col=as.factor(quality)))+
+  geom_boxplot()+
+  ggtitle("Density of red wine by quality", "Top quality red wine display a low density level")
+
+```
+
+```{r}
+lmRedAlc <- lm(alcohol ~ as.factor(quality), wine%>%dplyr::filter(colour==1))
+summary(lmRedAlc)
+```
+
+
+```{r}
+lmRedDens <- lm(density ~ as.factor(quality), wine%>%dplyr::filter(colour==1))
+summary(lmRedDens)
+```
+
+
+# Further exploratory data analysis
+
+The quality distribution differs slightly by wine colour. After performing a Pearson's Chi-squared hypothesis test, we find that the probabilities of receiving a certain quality rating are different for red and white wine. White wine is in general more likely ot get a higher rating.
+
+```{r probabilities per quality}
+pivot <- wine%>%group_by(colour, quality)%>%summarize(quality_count = dplyr::n(), .groups = "drop")%>%
+  pivot_wider(names_from = colour, values_from = quality_count)
+
+
+pivot[is.na(pivot)]<-0
+cont <- as.data.frame(t(pivot[,-1]))
+colnames(cont) <- pivot$quality
+cont
+
+probRating1 <- cont/ rowSums(cont)
+probRating<- round(probRating1,3)
+
+```
+
+
+```{r}
+probs <- t(probRating)
+colnames(probs)<-c("white","red")
+probs<-data.frame(probs)
+probs$quality <- c(3,4,5,6,7,8,9)
+                       
+probs <- probs%>%pivot_longer(white:red,
+                     names_to="colour",
+                     values_to="prob")
+
+probs_byColor <- probs%>%pivot_wider(names_from="quality", values_from="prob")
+
+probs_wide <- probs%>%pivot_wider(names_from="quality", values_from="prob")
+colnames(probs_wide)<-c("Probability distribution", "Quality 3","Quality 4","Quality 5","Quality 6","Quality 7","Quality 8","Quality 9")
+probs_wide
+
+
+```
+
+
+```{r EDA PLOT1 alcohol vs density plots, include=TRUE}
+
+alc_dens<-ggplot(wine%>%mutate(colour=fct_recode(as.factor(colour),
+                                       "red"= "1" ,
+                                       "white" = "0")), aes(x=alcohol, y=density, color= as.factor(colour)))+
+  geom_point(alpha=.2)+
+  scale_colour_manual(values = binCol)+
+  geom_smooth(method="lm")+
+  ggtitle("Correlation between density and alcohol level", "White wine show a steeper negative correlation")+
+  labs(x="Alcohol content", y="Density")+
+  theme(legend.position = "none")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+```
+
+
+```{r quality distribution by colour}
+
+
+ggplot(wine%>%mutate(colour=fct_recode(as.factor(colour),
+                                         "red"= "1" ,
+                                         "white" = "0")))+
+geom_bar(aes(y=as.factor(colour),fill=as.factor(quality)), position="fill")+
+scale_x_continuous(labels= scales::percent)+
+ggtitle("Quality split by wine colour", "White wine have a larger share of top quality wine, than red ones")+
+labs(fill="Quality", x="Percentage share by quality level", y="")+
+theme_classic()
+
+#prob distribution of quality rating by colour:
+probs$colour <- factor(probs$colour, levels=c("white", "red"))
+
+cols <- ggplot(probs, aes(x=as.factor(quality), y=prob, fill=colour))+
+  geom_col(position="dodge")+
+  scale_fill_manual(values = c("#9999FF", "#FF6666"))+
+  ggtitle("Probability distribution of qualities by colour", "Most white wine in #6, red ones in #5")+
+  labs(x="Quality", y="Percentage of qualities")+
+ scale_y_continuous(labels=scales::percent)+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+
+```
+
+```{r fig.width=14, fig.height=6,include = TRUE}
+
+knitr::kable(probs_byColor, "pipe", caption = "Likelihood of each category by wine colour")
+```
+
+```{r fig.width=14, fig.height=7, include=TRUE}
+cols + alc_dens
+```
+
+
+```{r expected values}
+expected <- outer(rowSums(cont), colSums(cont), "*") / sum(cont)
+expected
+```
+
+
+```{r}
+# computing the test statistics:
+test.stat <-sum((cont-expected)^2 / expected)
+test.stat
+```
+
+
+```{r}
+chisq.test(cont)
+```
+
+# Hotelling's T-squared test of mean acidity
+
+```{r}
+wine%>%dplyr::select(colour,fixed.acidity, volatile.acidity, pH)
+```
+
+We aim to test the difference of mean acidity  between red and white wine for multiple variables, all at once. The Hotelling's T-squared test is a generalization of the univariate Student's T-test, hence can be applied on our multivariate data to compare the means between two samples (red and white wine). Accordingly, we use this method to test whether there is significant difference between the mean acidity (fixed acidity, volatile acidity and pH) by wine colour. We assume that our variables are normally distributed (CLT). Although the quantile-quantile plot displays approximate normality only for the pH value, when plotting fixed and volatile acidity by wine colour, we see a Q-Q Plot closer to normal. Hence because of CLT and this reason, we keep the assumption of normality for the T-squared test. 
+
+```{r}
+#If the two distributions are comparable and similar, their plot will approximately lie on the diagonal line x=y.
+qqnorm(scale(wine$residual.sugar), main="Q-Q plot Residual sugar")
+qqline(scale(wine$residual.sugar))
+white <- wine%>%filter(colour==0)
+red <-wine%>%filter(colour==1)
+library(DescTools)
+PlotQQ(scale(wine$residual.sugar),main="Q-Q plot Residual sugar")#long tails scooping out
+PlotQQ(scale(white$residual.sugar),main="Q-Q plot Residual sugar")
+PlotQQ(scale(red$residual.sugar),main="Q-Q plot Residual sugar")#long tails scooping out
+PlotQQ(scale(wine$density),main="Q-Q plot Density") #approx. normal
+#####
+# Fixed and volatile acidity closer to or approximately normal when plotting by colour
+# pH apporximately noraml
+PlotQQ(scale(wine$fixed.acidity),main="Q-Q plot Fixed acidity")
+PlotQQ(scale(white$fixed.acidity),main="Q-Q plot Fixed acidity")#approx normal
+PlotQQ(scale(red$fixed.acidity),main="Q-Q plot Fixed acidity") # closer to normality, than red and white
+PlotQQ(scale(wine$volatile.acidity),main="Q-Q plot Volatile acidity")#long tails scooping out
+PlotQQ(scale(white$volatile.acidity),main="Q-Q plot Volatile acidity")
+PlotQQ(scale(red$volatile.acidity),main="Q-Q plot Volatile acidity") # closer to normal, tails still scooping
+
+PlotQQ(scale(wine$pH),main="Q-Q plot pH") #approx. normal
+
+```
+
+```{r fig.height = 7, fig.width = 14, include=TRUE}
+qq_facid <-ggplot(wine, aes(sample=scale(wine$fixed.acidity)))+
+  stat_qq()+
+  stat_qq_line()+
+  labs( x="Theoretical quantiles", y="Sample quantiles")+
+  ggtitle("Q-Q-Plot Fixed acidity")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+qq_vacid <-ggplot(wine, aes(sample=scale(wine$volatile.acidity)))+
+  stat_qq()+
+  stat_qq_line()+
+  labs( x="Theoretical quantiles", y="")+
+  ggtitle("Q-Q-Plot Volatile acidity")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+qq_ph <-ggplot(wine, aes(sample=scale(wine$pH)))+
+  stat_qq()+
+  stat_qq_line()+
+  labs( x="Theoretical quantiles", y="")+
+  ggtitle("Q-Q-Plot pH")+
+  theme(plot.title = element_text(size=22, lineheight = .9, family = "Times", face="bold", colour = "black"),
+        plot.subtitle = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.text=element_text(size=8),
+        axis.title=element_text(size=16,face="bold"),
+        axis.text.x = element_text(face="bold", size=14),
+        axis.text.y = element_text(face="bold", size=14))
+
+
+qq_facid + qq_vacid + qq_ph
+```
+
+
+```{r}
+det(cov(wine%>%dplyr::select(fixed.acidity, volatile.acidity, pH))) #the determinant is positive. hence we can apply Hotelling's T-sqrd test
+```
+
+```{r hotelling means within groups}
+
+facid.white.mean <- wine%>%filter(colour == 0)%>%
+  dplyr::select(fixed.acidity)%>%
+  apply(2,mean)
+
+facid.red.mean <- wine%>%filter(colour == 1)%>%
+  dplyr::select(fixed.acidity)%>%
+  apply(2,mean)
+
+vacid.white.mean <- wine%>%filter(colour == 0)%>%
+  dplyr::select(volatile.acidity)%>%
+  apply(2,mean)
+
+vacid.red.mean <- wine%>%filter(colour == 1)%>%
+  dplyr::select(volatile.acidity)%>%
+  apply(2,mean)
+
+ph.white.mean <- wine%>%filter(colour == 0)%>%
+  dplyr::select(pH)%>%
+  apply(2,mean)
+
+ph.red.mean <- wine%>%filter(colour == 1)%>%
+  dplyr::select(pH)%>%
+  apply(2,mean)
+
+
+cat(facid.white.mean, facid.red.mean)
+cat(vacid.white.mean, vacid.red.mean)
+cat(ph.white.mean, ph.red.mean)
+
+meanTab <- matrix(c(facid.white.mean,vacid.white.mean,ph.white.mean,facid.red.mean,vacid.red.mean,ph.red.mean),ncol=3, nrow=2, byrow=TRUE)
+
+colnames(meanTab) <- c("Mean fixed acidity", "Mean volatile acidity", "Mean pH")
+rownames(meanTab) <- c("white", "red")
+tab <- as.table(meanTab)
+
+```
+The null hypothesis states that white wine have the same acidity means as red wine. $$H_{0}: \mu_{acidity, white} = \theta_{acidity, red}$$
+
+$$H_{A}: \mu_{acidity, white} \neq \theta_{acidity, red}$$
+
+
+```{r include=TRUE}
+#knitr::kable(round(tab,3), "pipe", align=c("r", "r", "r", "r"),caption = "Mean acidity for red and white wine")
+knitr::kable(round(tab,3), caption="Mean values by wine colour")
+```
+
+The T-squared value of the test is 11,471.74 and the F-statistic returns 3,822.735. We validate this value by an F-distribution of 3 and 6494 degrees of freedom, and get a p-value of zero.
+Hence, it is a very strong evidence against the null hypothesis, meaning that there is significant difference in mean acidity by wine colour.
+
+```{r}
+n1 <- nrow(wine%>%filter(colour==0)) # number of white wine observations in the data set
+n2 <- nrow(wine%>%filter(colour==1))# number of red wine observations in the data set
+n  <- n1+n2
+p <-3 # 3 variables
+```
+
+
+```{r covriance matrix white wine}
+white <- wine%>%filter(colour==0)%>%dplyr::select(fixed.acidity, volatile.acidity, pH)
+red <- wine%>%filter(colour==1)%>%dplyr::select(fixed.acidity, volatile.acidity, pH)
+cov(white)
+cov(red)
+```
+
+
+```{r}
+library(Hotelling)
+library(corpcor)
+fit <- hotelling.test(white,red)
+fit
+```
+
+```{r}
+a1<- ggplot(wine, aes(x=as.factor(colour), y=fixed.acidity))+
+  geom_boxplot()
+
+a2<-ggplot(wine, aes(x=as.factor(colour), y=volatile.acidity))+
+  geom_boxplot()
+
+a3<-ggplot(wine, aes(x=as.factor(colour), y=pH))+
+  geom_boxplot()
+```
+
+```{r fig.width=18, fig.height=7}
+(a1 |a2| a3) +gridExtra::grid.table(tab)
+```
+
+```{r pooled covriance matrix}
+# since the sample sizes by group differ, the pooled within-group covariance matrix:
+S <- ((n1-1)*cov(white) + (n2-1)*cov(red)) / (n-2)
+S
+
+x_bar<- c(tab[[1]],tab[[3]],tab[[5]])
+mu <- c(tab[[2]],tab[[4]],tab[[6]])
+vec <-x_bar - mu
+```
+
+
+```{r}
+T <- (n1*n2/n)%*%t(vec)%*%solve(S)%*%vec
+T # 11471.74
+F<-T*((n-p)/(n*p-p))
+F # 3822.735
+1-pf(F, p, n-p)
+
+
+```
+
+
+# One-sample T-squared test of residual sugar and density 
+Our assumption is that all samples are independent, and both residual sugar and density are normally distributed for each group (CLT). Here again, density displays a close to normal distribution on a Q-Q plot, but the long tails of residual sugar are scooping out. Breaking it down by wine colour, its distribution gets closer to normal. 
+
+
+```{r include=TRUE}
+#$$H_{0}: \mu_{residual sugar, white} = \mu_{residual sugar, red}$$, $$H_{0}: \theta_{density, white} = \theta_{density, red}$$
+meanTab <- matrix(c(mean(white$residual.sugar),mean(white$density),mean(red$residual.sugar),mean(red$density)),ncol=2, nrow=2, byrow=TRUE)
+
+colnames(meanTab) <- c("Residual sugar", "Density")
+rownames(meanTab) <- c("white", "red")
+tab1 <- as.table(meanTab)
+
+```
+
+
+```{r include=FALSE}
+knitr::kable(round(tab1,3), caption="Mean values by wine colour")
+```
+
+With this statistical method we compute the mean values of white wine, and test these against pre-set values, which will correspond to the mean values of red wine in our test. Our T-squared value is 21,186, and we get a p-value of < 2.2e-16, virtually zero. This is again a very strong evidence against the hypothesis, that the residual sugar level and density are the same for red and white wine.   
+
+```{r}
+white <- wine%>%filter(colour==0)%>%dplyr::select(residual.sugar, density)
+red <- wine%>%filter(colour==1)%>%dplyr::select(residual.sugar, density)
+x_bar <- c(mean(white$residual.sugar), mean(white$density))
+mu_red <- c(mean(red$residual.sugar), mean(red$density))
+p <-length(x_bar)
+```
+
+
+```{r}
+library(ICSNP)
+one.sample <- HotellingsT2(white, mu =colMeans(red) , test = "f")
+one.sample
+```
+```{r}
+ggplot(wine, aes(x=as.factor(colour), y=residual.sugar))+
+  geom_boxplot()
+
+test1 <-ggplot(wine, aes(x=as.factor(colour), y=pH))+
+  geom_boxplot()
+```
+
+
+
+
+```{r}
+white <- wine%>%filter(colour==0)
+x_bar_white <- mean(white$residual.sugar) #white mean residual sugar:  6.391415
+s_sqrd_white <- var(white$residual.sugar) #white  variance res. sugar: 25.72577
+# 95% confidence interval for the population mean:
+quant<- qt(0.975, n1-1) # t_n1-1_.025 = 1.960449
+lower_white <-x_bar_white-quant*sqrt(s_sqrd_white/n1)
+upper_white<-x_bar_white+quant*sqrt(s_sqrd_white/n1)
+cat(lower_white,  upper_white) # the 95% CI for the pop. mean res. sugar white wine: (6.249336, 6.533494)
+```
+
+
+
+# References
+https://patchwork.data-imaginist.com/articles/guides/assembly.html, https://github.com/thomasp85/patchwork, https://www.rapidtables.com/web/color/RGB_Color.html, https://ggplot2.tidyverse.org/reference/scale_manual.html , https://cran.r-project.org/web/packages/ggcorrplot/readme/README.html  
+https://www.geo.fu-berlin.de/en/v/soga/Geodata-analysis/Principal-Component-Analysis/principal-components-basics/Interpretation-and-visualization/index.html  
+https://stackoverflow.com/questions/7970179/transposing-a-dataframe-maintaining-the-first-column-as-heading  
+https://stackoverflow.com/questions/38722202/how-do-i-change-the-number-of-decimal-places-on-axis-labels-in-ggplot2 https://towardsdatascience.com/mahalonobis-distance-and-outlier-detection-in-r-cb9c37576d7d, University of Sheffield - MAS5052 lecture notes, R for Data Science, Hadley Wickham & Garrett Grolemund  
+
+
+
+```{r}
+var <- wine%>%dplyr::select(fixed.acidity, pH)
+var.center = colMeans(var)
+var.cov = cov(var)
+
+rad = qchisq(p=0.95, df=ncol(var))
+ellipse <- car::ellipse(center = var.center, shape = var.cov, radius = rad, segments=150, draw=FALSE)
+
+ellipse <- as.data.frame(ellipse)
+colnames(ellipse) <- colnames(var)
+
+
+#ggplot(var, aes(x =fixed.acidity, y = pH)) +
+       #geom_point(size = 2) +
+       #geom_polygon(data = ellipse , fill = "lightblue" , color = "darkblue" , alpha = 0.5)+
+       #geom_point(aes(var.center[1] , var.center[2]) , size = 5 , color = "red") +
+       #geom_text( aes(row.names(var)) , hjust = 1 , vjust = -2.5 ,size = 2.5 ) +
+       #ylab("pH") + xlab("fixed.acidity")
+       
+```
+
+
+
+```{r}
+var <- wine%>%dplyr::select(residual.sugar, density)
+var.center = colMeans(var)
+var.cov = cov(var)
+
+rad = qchisq(p=0.95, df=ncol(var))
+ellipse <- car::ellipse(center = var.center, shape = var.cov, radius = rad, segments=150, draw=FALSE)
+
+
+ellipse <- as.data.frame(ellipse)
+colnames(ellipse) <- colnames(var)
+
+
+ #ggplot(var , aes(x = residual.sugar , y = density)) +
+       #geom_point(size = 2) +
+       #geom_polygon(data = ellipse , fill = "orange" , color = "orange" , alpha = 0.5)+
+       #geom_point(aes(var.center[1] , var.center[2]) , size = 5 , color = "blue") +
+       #geom_text( aes(label = row.names(var)) , hjust = 1 , vjust = -1.5 ,size = 2.5 ) +
+       #ylab("Density") + xlab("Residual sugar")
+       
+
+```
+
+
+
+
+```{r}
+# plotting the data
+cat(facid.white.mean,vacid.white.mean, facid.red.mean, vacid.red.mean)
+
+ggplot(wine, aes(x=fixed.acidity, y=volatile.acidity, col=as.factor(colour)))+
+  geom_point()+
+  annotate("point", x = 6.854788, y = 0.2782411, col="black", size=3)+
+  annotate("text", x = 6.854788, y = 0.2782411, col="black", label="centroid_white", vjust = -0.4)+
+  annotate("point", x = 8.319637, y = 0.5278205, col="black", size=3)+
+  annotate("text", x = 8.319637, y = 0.5278205, col="black", label="centroid_red", vjust = -0.4)+
+  ggtitle("Fixed acidity vs vol acidity")
+```
+
+```{r}
+cat(facid.white.mean,ph.white.mean, facid.red.mean, ph.red.mean)
+
+ggplot(wine, aes(x=fixed.acidity, y=pH, col=as.factor(colour)))+
+  geom_point()+
+  annotate("point", x = 6.854788, y = 3.188267, col="black", size=3)+
+  annotate("text", x = 6.854788, y = 3.188267, col="black", label="centroid_white", vjust = -0.4)+
+  annotate("point", x = 8.319637, y = 3.311113, col="black", size=3)+
+  annotate("text", x = 8.319637, y = 3.311113, col="black", label="centroid_red", vjust = -0.4)+
+  ggtitle("Fixed acidity vs pH")
+```
+
+```{r}
+cat(vacid.white.mean,ph.white.mean, vacid.red.mean, ph.red.mean)
+
+ggplot(wine, aes(x=volatile.acidity, y=pH, col=as.factor(colour)))+
+  geom_point()+
+  annotate("point", x =0.2782411, y = 3.188267, col="black", size=3)+
+  annotate("text", x = 0.2782411, y = 3.188267, col="black", label="centroid_white", vjust = -0.4)+
+  annotate("point", x = 0.5278205, y = 3.311113, col="black", size=3)+
+  annotate("text", x = 0.5278205, y = 3.311113, col="black", label="centroid_red", vjust = -0.4)+
+  ggtitle("Volatile acidity vs pH")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
